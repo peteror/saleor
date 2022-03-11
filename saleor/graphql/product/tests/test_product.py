@@ -41,7 +41,10 @@ from ....product.models import (
     ProductVariant,
     ProductVariantChannelListing,
 )
-from ....product.search import prepare_product_search_document_value
+from ....product.search import (
+    prepare_product_search_document_value,
+    prepare_product_search_vector_value,
+)
 from ....product.tasks import update_variants_names
 from ....product.tests.utils import create_image, create_pdf_file_with_image_ext
 from ....product.utils.availability import get_variant_availability
@@ -2348,7 +2351,10 @@ def test_products_query_with_filter_category_and_search(
 
     for pr in [product, second_product]:
         pr.search_document = prepare_product_search_document_value(pr)
-    Product.objects.bulk_update([product, second_product], ["search_document"])
+        pr.search_vector = prepare_product_search_vector_value(pr)
+    Product.objects.bulk_update(
+        [product, second_product], ["search_document", "search_vector"]
+    )
 
     category_id = graphene.Node.to_global_id("Category", category.id)
     variables = {"filter": {"categories": [category_id], "search": product.name}}
@@ -2482,7 +2488,8 @@ def test_products_query_with_filter(
     second_product.search_document = prepare_product_search_document_value(
         second_product
     )
-    second_product.save(update_fields=["search_document"])
+    second_product.search_vector = prepare_product_search_vector_value(second_product)
+    second_product.save(update_fields=["search_document", "search_vector"])
     variables = {"filter": products_filter, "channel": channel_USD.slug}
     staff_api_client.user.user_permissions.add(permission_manage_products)
     response = staff_api_client.post_graphql(query_products_with_filter, variables)
@@ -2595,7 +2602,10 @@ def test_products_query_with_filter_search_by_dropdown_attribute_value(
     product_with_dropdown_attr.search_document = prepare_product_search_document_value(
         product_with_dropdown_attr
     )
-    product_with_dropdown_attr.save(update_fields=["search_document"])
+    product_with_dropdown_attr.search_vector = prepare_product_search_vector_value(
+        product_with_dropdown_attr
+    )
+    product_with_dropdown_attr.save(update_fields=["search_document", "search_vector"])
 
     variables = {"filter": {"search": search_value}, "channel": channel_USD.slug}
 
@@ -2615,7 +2625,7 @@ def test_products_query_with_filter_search_by_dropdown_attribute_value(
 
 
 @pytest.mark.parametrize(
-    "search_value", ["eco mode", "ECO Performance", "performa", "mod"]
+    "search_value", ["eco mode", "ECO Performance", "performant*", "modes"]
 )
 def test_products_query_with_filter_search_by_multiselect_attribute_value(
     search_value,
@@ -2657,7 +2667,12 @@ def test_products_query_with_filter_search_by_multiselect_attribute_value(
     product_with_multiselect_attr.search_document = (
         prepare_product_search_document_value(product_with_multiselect_attr)
     )
-    product_with_multiselect_attr.save(update_fields=["search_document"])
+    product_with_multiselect_attr.search_vector = prepare_product_search_vector_value(
+        product_with_multiselect_attr
+    )
+    product_with_multiselect_attr.save(
+        update_fields=["search_document", "search_vector"]
+    )
 
     variables = {"filter": {"search": search_value}, "channel": channel_USD.slug}
 
@@ -2705,7 +2720,10 @@ def test_products_query_with_filter_search_by_rich_text_attribute(
     product_with_rich_text_attr.search_document = prepare_product_search_document_value(
         product_with_rich_text_attr
     )
-    product_with_rich_text_attr.save(update_fields=["search_document"])
+    product_with_rich_text_attr.search_vector = prepare_product_search_vector_value(
+        product_with_rich_text_attr
+    )
+    product_with_rich_text_attr.save(update_fields=["search_document", "search_vector"])
 
     variables = {"filter": {"search": search_value}, "channel": channel_USD.slug}
 
@@ -2756,7 +2774,10 @@ def test_products_query_with_filter_search_by_numeric_attribute_value(
     product_with_numeric_attr.search_document = prepare_product_search_document_value(
         product_with_numeric_attr
     )
-    product_with_numeric_attr.save(update_fields=["search_document"])
+    product_with_numeric_attr.search_vector = prepare_product_search_vector_value(
+        product_with_numeric_attr
+    )
+    product_with_numeric_attr.save(update_fields=["search_document", "search_vector"])
 
     variables = {"filter": {"search": search_value}, "channel": channel_USD.slug}
 
@@ -2803,7 +2824,10 @@ def test_products_query_with_filter_search_by_numeric_attribute_value_without_un
     product_with_numeric_attr.search_document = prepare_product_search_document_value(
         product_with_numeric_attr
     )
-    product_with_numeric_attr.save(update_fields=["search_document"])
+    product_with_numeric_attr.search_vector = prepare_product_search_vector_value(
+        product_with_numeric_attr
+    )
+    product_with_numeric_attr.save(update_fields=["search_document", "search_vector"])
 
     variables = {"filter": {"search": "13456"}, "channel": channel_USD.slug}
 
@@ -2822,7 +2846,7 @@ def test_products_query_with_filter_search_by_numeric_attribute_value_without_un
     assert products[0]["node"]["name"] == product_with_numeric_attr.name
 
 
-@pytest.mark.parametrize("search_value", ["2020", "2020 10 10", "2020-10-10"])
+@pytest.mark.parametrize("search_value", ["2020", "2020-10-10"])
 def test_products_query_with_filter_search_by_date_attribute_value(
     search_value,
     query_products_with_filter,
@@ -2851,7 +2875,10 @@ def test_products_query_with_filter_search_by_date_attribute_value(
     product_with_date_attr.search_document = prepare_product_search_document_value(
         product_with_date_attr
     )
-    product_with_date_attr.save(update_fields=["search_document"])
+    product_with_date_attr.search_vector = prepare_product_search_vector_value(
+        product_with_date_attr
+    )
+    product_with_date_attr.save(update_fields=["search_document", "search_vector"])
 
     variables = {"filter": {"search": search_value}, "channel": channel_USD.slug}
 
@@ -2870,7 +2897,7 @@ def test_products_query_with_filter_search_by_date_attribute_value(
     assert products[0]["node"]["name"] == product_with_date_attr.name
 
 
-@pytest.mark.parametrize("search_value", ["2020", "2020 10 10", "2020-10-10", "22:20"])
+@pytest.mark.parametrize("search_value", ["2020", "2020-10-10", "22:20"])
 def test_products_query_with_filter_search_by_date_time_attribute_value(
     search_value,
     query_products_with_filter,
@@ -2899,7 +2926,10 @@ def test_products_query_with_filter_search_by_date_time_attribute_value(
     product_with_date_time_attr.search_document = prepare_product_search_document_value(
         product_with_date_time_attr
     )
-    product_with_date_time_attr.save(update_fields=["search_document"])
+    product_with_date_time_attr.search_vector = prepare_product_search_vector_value(
+        product_with_date_time_attr
+    )
+    product_with_date_time_attr.save(update_fields=["search_document", "search_vector"])
 
     variables = {"filter": {"search": search_value}, "channel": channel_USD.slug}
 
@@ -4408,9 +4438,11 @@ def test_search_product_by_description_and_name(
     product_list.append(product)
     for prod in product_list:
         prod.search_document = prepare_product_search_document_value(prod)
+        prod.search_vector = prepare_product_search_vector_value(prod)
 
     Product.objects.bulk_update(
-        product_list, ["search_document", "name", "description_plaintext"]
+        product_list,
+        ["search_document", "search_vector", "name", "description_plaintext"],
     )
 
     variables = {
@@ -4432,22 +4464,23 @@ def test_search_product_by_description_and_name(
 
 
 def test_sort_product_by_rank_without_search(
-    user_api_client, product_list, product, channel_USD, category, product_type
+    user_api_client, product_list, channel_USD
 ):
-    product_count = Product.objects.count()
-
     variables = {
         "sortBy": {"field": "RANK", "direction": "DESC"},
         "channel": channel_USD.slug,
     }
     response = user_api_client.post_graphql(SEARCH_PRODUCTS_QUERY, variables)
-    content = get_graphql_content(response)
-    data = content["data"]["products"]["edges"]
-    assert len(data) == product_count
+    content = get_graphql_content(response, ignore_errors=True)
+    assert "errors" in content
+    assert (
+        content["errors"][0]["message"]
+        == "Sorting by Rank is available only with searching."
+    )
 
 
 def test_search_product_by_description_and_name_without_sort_by(
-    user_api_client, product_list, product, channel_USD, category, product_type
+    user_api_client, product_list, product, channel_USD
 ):
     product.description_plaintext = "new big new product"
 
@@ -4459,9 +4492,11 @@ def test_search_product_by_description_and_name_without_sort_by(
     product_list.append(product)
     for prod in product_list:
         prod.search_document = prepare_product_search_document_value(prod)
+        prod.search_vector = prepare_product_search_vector_value(prod)
 
     Product.objects.bulk_update(
-        product_list, ["search_document", "name", "description_plaintext"]
+        product_list,
+        ["search_document", "search_vector", "name", "description_plaintext"],
     )
 
     variables = {
@@ -4495,9 +4530,11 @@ def test_search_product_by_description_and_name_and_use_cursor(
     product_list.append(product)
     for prod in product_list:
         prod.search_document = prepare_product_search_document_value(prod)
+        prod.search_vector = prepare_product_search_vector_value(prod)
 
     Product.objects.bulk_update(
-        product_list, ["search_document", "name", "description_plaintext"]
+        product_list,
+        ["search_document", "search_vector", "name", "description_plaintext"],
     )
 
     variables = {
