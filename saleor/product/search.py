@@ -75,7 +75,6 @@ def prepare_product_search_vector_value(
     if variants_vector:
         search_vector += variants_vector
 
-    print(search_vector)
     return search_vector
 
 
