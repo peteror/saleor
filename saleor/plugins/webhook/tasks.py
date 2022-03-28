@@ -1,5 +1,6 @@
 import json
 import logging
+import math
 from dataclasses import dataclass
 from enum import Enum
 from json import JSONDecodeError
@@ -9,8 +10,10 @@ from urllib.parse import urlparse, urlunparse
 import boto3
 import requests
 from botocore.exceptions import ClientError
-from celery.exceptions import MaxRetriesExceededError
+from celery import group
+from celery.exceptions import MaxRetriesExceededError, Retry
 from celery.utils.log import get_task_logger
+from django.conf import settings
 from google.cloud import pubsub_v1
 from requests.exceptions import RequestException
 
@@ -23,6 +26,8 @@ from ...settings import WEBHOOK_SYNC_TIMEOUT, WEBHOOK_TIMEOUT
 from ...site.models import Site
 from ...webhook.event_types import WebhookEventAsyncType, WebhookEventSyncType
 from ...webhook.models import Webhook
+from ...webhook.observability_reporter import buffer, report_event_delivery_attempt
+from ...webhook.observability_reporter.utils import task_next_retry_date
 from . import signature_for_payload
 from .utils import (
     attempt_update,
@@ -282,6 +287,10 @@ def send_webhook_request_async(self, event_delivery_id):
             try:
                 countdown = self.retry_backoff * (2**self.request.retries)
                 self.retry(countdown=countdown, **self.retry_kwargs)
+            except Retry as retry_error:
+                next_retry = task_next_retry_date(retry_error)
+                report_event_delivery_attempt(attempt, next_retry)
+                raise retry_error
             except MaxRetriesExceededError:
                 task_logger.warning(
                     "[Webhook ID: %r] Failed request to %r: exceeded retry limit."
@@ -304,6 +313,7 @@ def send_webhook_request_async(self, event_delivery_id):
         response = WebhookResponse(content=str(e), status=EventDeliveryStatus.FAILED)
         attempt_update(attempt, response)
         delivery_update(delivery=delivery, status=EventDeliveryStatus.FAILED)
+    report_event_delivery_attempt(attempt)
     clear_successful_delivery(delivery)
 
 
@@ -377,9 +387,68 @@ def send_webhook_request_sync(
 
     attempt_update(attempt, response)
     delivery_update(delivery, response.status)
+    report_event_delivery_attempt(attempt)
     clear_successful_delivery(delivery)
 
     return response_data if response.status == EventDeliveryStatus.SUCCESS else None
+
+
+@app.task
+def observability_send_events():
+    events = buffer.get_events()
+    if not events:
+        return 0
+    domain = Site.objects.get_current().domain
+    event_type = WebhookEventAsyncType.OBSERVABILITY
+    for webhook in _get_webhooks_for_event(event_type):
+        scheme = urlparse(webhook.target_url).scheme.lower()
+        response = WebhookResponse(content="", status=EventDeliveryStatus.FAILED)
+        if scheme in [WebhookSchemes.AWS_SQS, WebhookSchemes.GOOGLE_CLOUD_PUBSUB]:
+            for event in events:
+                response = send_webhook_using_scheme_method(
+                    webhook.target_url,
+                    domain,
+                    webhook.secret_key,
+                    event_type,
+                    json.dumps(event),
+                )
+                if response.status == EventDeliveryStatus.FAILED:
+                    break
+        else:
+            response = send_webhook_using_scheme_method(
+                webhook.target_url,
+                domain,
+                webhook.secret_key,
+                event_type,
+                json.dumps(events),
+            )
+        if response.status == EventDeliveryStatus.SUCCESS:
+            logger.debug(
+                "Observability successful delivered %s of type %r to %r.",
+                len(events),
+                event_type,
+                webhook.target_url,
+            )
+        else:
+            task_logger.info(
+                "Observability webhook ID: %r failed request to %r: %r for event: %r.",
+                webhook.id,
+                webhook.target_url,
+                response.content,
+                event_type,
+            )
+    return len(events)
+
+
+@app.task
+def observability_reporter_task():
+    batch_count = math.ceil(
+        buffer.buffer_size() / settings.OBSERVABILITY_BUFFER_BATCH_SIZE
+    )
+    tasks = [observability_send_events.s() for _ in range(batch_count)]
+    if tasks:
+        expiration = settings.OBSERVABILITY_REPORT_PERIOD.total_seconds()
+        group(tasks).apply_async(expires=expiration)
 
 
 # DEPRECATED
